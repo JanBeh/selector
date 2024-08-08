@@ -49,6 +49,7 @@ local function assemble(args)
       return tostring(args)
     end
     local used_param_idxs = {}
+    -- TODO: ident_idx does not work properly if both '$' and '$$$' are present
     local ident_idx = 0
     local templ = args[1]
     if find(templ, "\0") then
