@@ -276,8 +276,9 @@ function _M.selector_prototype:add_order_by(expr)
   return self
 end
 
-function _M.selector_prototype:limit(count)
+function _M.selector_prototype:limit(count, with_ties)
   self._limit = count
+  self._with_ties = with_ties
   return self
 end
 
@@ -327,11 +328,20 @@ function _M.selector_prototype:build_table()
   if self._order_by then
     parts[#parts+1] = {'ORDER BY $$, $', self._order_by}
   end
-  if self._limit then
-    parts[#parts+1] = {'LIMIT $', self._limit}
-  end
-  if self._offset then
-    parts[#parts+1] = {'OFFSET $', self._offset}
+  if self._with_ties then
+    if self._offset then
+      parts[#parts+1] = {'OFFSET $', self._offset}
+    end
+    if self._limit then
+      parts[#parts+1] = {'FETCH NEXT $ ROWS WITH TIES', self._limit}
+    end
+  else
+    if self._limit then
+      parts[#parts+1] = {'LIMIT $', self._limit}
+    end
+    if self._offset then
+      parts[#parts+1] = {'OFFSET $', self._offset}
+    end
   end
   if self._for then
     for idx, part in ipairs(self._for) do
