@@ -285,23 +285,8 @@ function _M.selector_prototype:offset(count)
   return self
 end
 
-function _M.selector_prototype:for_share()
-  self._read_lock_all = true
-  return self
-end
-
-function _M.selector_prototype:for_share_of(expr)
-  add(self, "_read_lock", expr)
-  return self
-end
-
-function _M.selector_prototype:for_update()
-  self._write_lock_all = true
-  return self
-end
-
-function _M.selector_prototype:for_update_of(expr)
-  add(self, "_write_lock", expr)
+function _M.selector_prototype:add_for(clause)
+  add(self, "_for", clause)
   return self
 end
 
@@ -347,16 +332,9 @@ function _M.selector_prototype:build_table()
   if self._offset then
     parts[#parts+1] = {'OFFSET $', self._offset}
   end
-  if self._write_lock_all then
-    parts[#parts+1] = 'FOR UPDATE'
-  else
-    if self._read_lock_all then
-      parts[#parts+1] = 'FOR SHARE'
-    elseif self._read_lock then
-      parts[#parts+1] = {'FOR SHARE OF $$, $', self._read_lock}
-    end
-    if self._write_lock then
-      parts[#parts+1] = {'FOR UPDATE OF $$, $', self._write_lock}
+  if self._for then
+    for idx, part in ipairs(self._for) do
+      parts[#parts+1] = part
     end
   end
   return assemble{"$$ $", parts}
