@@ -8,6 +8,15 @@ local _M = {}
 local find = string.find
 local gsub = string.gsub
 local concat = table.concat
+local unpack = table.unpack
+
+local function quote_literal(s)
+  return "'" .. gsub(s, "'", "''") .. "'"
+end
+
+local function quote_ident(s)
+  return '"' .. gsub(s, "'", "''") .. '"'
+end
 
 local function assemble(args)
   local result = {}
@@ -66,6 +75,7 @@ local function assemble(args)
         param_counter = param_counter + 1
         param_idx = param_counter
         result[param_idx+1] = args[ident+1]
+        result.param_count = param_idx
         used_param_idxs[ident] = param_idx
       end
       return "\0" .. param_idx
@@ -88,16 +98,12 @@ end
 
 _M.selector_prototype = {}
 
-_M.selector_metatbl = {
-  __index = _M.selector_prototype,
-}
-
 function _M.new()
   return setmetatable({}, _M.selector_metatbl)
 end
 
 function _M.selector_prototype:add_with(alias, subselect)
-  add(self, "_with", {'"$$$" AS ($$$)', alias, subselect})
+  add(self, "_with", {'$$$ AS ($$$)', quote_ident(alias), subselect})
   return self
 end
 
@@ -119,7 +125,7 @@ end
 
 function _M.selector_prototype:add_field(expr, alias)
   if alias then
-    add(self, "_fields", {'$$$ AS "$$$"', expr, alias})
+    add(self, "_fields", {'$$$ AS $$$', expr, quote_ident(alias)})
   else
     add(self, "_fields", expr)
   end
@@ -142,13 +148,15 @@ function _M.selector_prototype:add_from(expr, alias, cond)
   end
   if getmetatable(expr) == _M.selector_metatbl then
     if alias then
-      add(self, "_from", {'($$$) AS "$$$"', expr:build(), alias})
+      add(
+        self, "_from", {'($$$) AS $$$', expr:build_table(), quote_ident(alias)}
+      )
     else
-      add(self, "_from", {'($$$) AS "subquery"', expr:build()})
+      add(self, "_from", {'($$$) AS "subquery"', expr:build_table()})
     end
   else
     if alias then
-      add(self, "_from", {'$$$ AS "$$$"', expr, alias})
+      add(self, "_from", {'$$$ AS $$$', expr, quote_ident(alias)})
     else
       add(self, "_from", expr)
     end
@@ -171,13 +179,15 @@ function _M.selector_prototype:left_join(expr, alias, cond)
   end
   if getmetatable(expr) == _M.selector_metatbl then
     if alias then
-      add(self, "_from", {'($$$) AS "$$$"', expr:build(), alias})
+      add(
+        self, "_from", {'($$$) AS $$$', expr:build_table(), quote_ident(alias)}
+      )
     else
       add(self, "_from", {'($$$) AS "subquery"', expr:build()})
     end
   else
     if alias then
-      add(self, "_from", {'$$$ AS "$$$"', expr, alias})
+      add(self, "_from", {'$$$ AS "$$$"', expr, quote_ident(alias)})
     else
       add(self, "_from", expr)
     end
@@ -284,7 +294,7 @@ function _M.selector_prototype:for_update_of(expr)
   return self
 end
 
-function _M.selector_prototype:build()
+function _M.selector_prototype:build_table()
   local parts = {}
   if self._with then
     parts[#parts+1] = {"WITH RECURSIVE $$, $", self._with}
@@ -340,5 +350,22 @@ function _M.selector_prototype:build()
   end
   return assemble{"$$ $", parts}
 end
+
+function _M.selector_prototype:build()
+  local tbl = self:build_table()
+  return unpack(tbl, 1, tbl.param_count + 1)
+end
+
+function _M.selector_prototype:build_string()
+  local tbl = self:build_table()
+  return (gsub(tbl[1], "$([0-9]+)", function(param_idx)
+    return quote_literal(tostring(tbl[tonumber(param_idx+1)]))
+  end))
+end
+
+_M.selector_metatbl = {
+  __index = _M.selector_prototype,
+  __tostring = _M.selector_prototype.build_string,
+}
 
 return _M
