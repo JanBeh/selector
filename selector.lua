@@ -10,12 +10,23 @@ local gsub = string.gsub
 local concat = table.concat
 local unpack = table.unpack
 
+local function quote_ident(s)
+  return '"' .. gsub(s, "'", "''") .. '"'
+end
+
 local function quote_literal(s)
+  if s == nil then return "NULL" end
   return "'" .. gsub(s, "'", "''") .. "'"
 end
 
-local function quote_ident(s)
-  return '"' .. gsub(s, "'", "''") .. '"'
+local function convert_bools(s)
+  if s == false then return "f" end
+  if s == true then return "t" end
+  return s
+end
+
+local function pass(...)
+  return ...
 end
 
 local function assemble(args)
@@ -358,8 +369,10 @@ end
 
 function _M.selector_prototype:build_string()
   local tbl = self:build_table()
+  local input_converter = self.input_converter or _M.input_converter or pass
   return (gsub(tbl[1], "$([0-9]+)", function(param_idx)
-    return quote_literal(tostring(tbl[tonumber(param_idx+1)]))
+    -- NOTE: adding one performs implicit cast to number
+    return quote_literal(convert_bools(input_converter(tbl[param_idx+1])))
   end))
 end
 
