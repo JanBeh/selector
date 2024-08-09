@@ -29,18 +29,13 @@ local function pass(...)
   return ...
 end
 
+local pat_sub = "$([0-9A-Za-z_]*)$([^$]*)($?)"
+local pat_val = "$([0-9A-Za-z_]*)"
+
 local function assemble(args)
   local result = {}
   local param_counter = 0
-  local inner_impl
-  local function inner(...)
-    local result = inner_impl(...)
-    if find(result, "%$") then
-      error("unexpected dollar")
-    end
-    return result
-  end
-  function inner_impl(args)
+  local function inner(args)
     local tp = type(args)
     if tp == "string" then
       return args
@@ -49,49 +44,75 @@ local function assemble(args)
       return tostring(args)
     end
     local used_param_idxs = {}
-    -- TODO: ident_idx does not work properly if both '$' and '$$$' are present
     local ident_idx = 0
     local templ = args[1]
+    if type(templ) ~= "string" then
+      error("string expected")
+    end
     if find(templ, "\0") then
       error("unexpected null byte")
     end
-    templ = gsub(templ, "$([0-9A-Za-z_]*)$([^$]*)($?)", function(ident, sep, d)
-      if d == "" then
-        error("unterminated dollar sequence")
-      end
-      if ident == "" then
-        ident_idx = ident_idx+1
-        ident = ident_idx
+    while true do
+      local pat_sub_pos = find(templ, pat_sub)
+      local pat_val_pos = find(templ, pat_val)
+      if pat_sub_pos and ((not pat_val_pos) or pat_sub_pos <= pat_val_pos) then
+        templ = gsub(
+          templ, pat_sub,
+          function(ident, sep, enddollar)
+            if enddollar == "" then
+              error("unterminated dollar sequence")
+            end
+            if ident == "" then
+              ident_idx = ident_idx+1
+              ident = ident_idx
+            else
+              ident = tonumber(ident) or ident
+            end
+            if sep == "" then
+              local replacement = inner(args[ident+1])
+              if find(replacement, "$", 1, true) then
+                error("unexpected dollar")
+              end
+            else
+              local parts = {}
+              for idx, element in ipairs(args[ident+1]) do
+                parts[idx] = inner(element)
+              end
+              local replacement = concat(parts, sep)
+              if find(replacement, "$", 1, true) then
+                error("unexpected dollar")
+              end
+              return replacement
+            end
+          end,
+          1
+        )
+      elseif pat_val_pos then
+        templ = gsub(
+          templ, pat_val,
+          function(ident)
+            if ident == "" then
+              ident_idx = ident_idx+1
+              ident = ident_idx
+            else
+              ident = tonumber(ident) or ident
+            end
+            local param_idx = used_param_idxs[ident]
+            if not param_idx then
+              param_counter = param_counter + 1
+              param_idx = param_counter
+              result[param_idx+1] = args[ident+1]
+              result.param_count = param_idx
+              used_param_idxs[ident] = param_idx
+            end
+            return "\0" .. param_idx
+          end,
+          1
+        )
       else
-        ident = tonumber(ident) or ident
+        break
       end
-      if sep == "" then
-        return inner(args[ident+1])
-      else
-        local parts = {}
-        for idx, element in ipairs(args[ident+1]) do
-          parts[idx] = inner(element)
-        end
-        return concat(parts, sep)
-      end
-    end)
-    templ = gsub(templ, "$([0-9A-Za-z_]*)", function(ident)
-      if ident == "" then
-        ident_idx = ident_idx+1
-        ident = ident_idx
-      else
-        ident = tonumber(ident) or ident
-      end
-      local param_idx = used_param_idxs[ident]
-      if not param_idx then
-        param_counter = param_counter + 1
-        param_idx = param_counter
-        result[param_idx+1] = args[ident+1]
-        result.param_count = param_idx
-        used_param_idxs[ident] = param_idx
-      end
-      return "\0" .. param_idx
-    end)
+    end
     return templ
   end
   result[1] = gsub(inner(args), "\0", "$")
@@ -100,6 +121,9 @@ end
 _M.assemble = assemble
 
 local function add(tbl, key, value)
+  if value == nil then
+    error("unexpected nil")
+  end
   local subtbl = tbl[key]
   if not subtbl then
     subtbl = {}
